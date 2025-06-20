@@ -18,3 +18,7 @@ A simple AssaultCube DMA base for learning
 - Aimbot improvements (Doesnt work great in this version) 
 - Read speeds
 - Read optimizations
+
+# Check out the External version!
+
+https://github.com/MarkCX1/AssaultCube-External-Base
