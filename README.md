@@ -9,8 +9,9 @@ A simple AssaultCube DMA base for learning
 # Feature TODO :
 - Team detection
 - Aimbot improvements (Doesnt work great in this version) 
-- Read speeds
+- Read speed improvements
 - Read optimizations
+- Fix the handful of problems caused
 
 # Check out the External version!
 
