@@ -21,4 +21,4 @@ A simple AssaultCube DMA base for learning
 
 # Check out the External version!
 
-https://github.com/MarkCX1/AssaultCube-External-Base
+https://github.com/MarkCX1/AssaultCube-External-Base/
