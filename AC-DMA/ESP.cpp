@@ -5,6 +5,48 @@
 #include <cmath>
 #include "vmmdll.h"
 
+// Global flag to track fullscreen state
+static bool isFullscreen = false;
+static RECT windowedRect = { 0 }; // To store windowed mode position/size
+
+// Custom window procedure to handle window messages
+LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        return 0;
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_KEYDOWN:
+        if (wParam == VK_F11) { // Allow f11 usage
+            isFullscreen = !isFullscreen;
+            if (isFullscreen) {
+                GetWindowRect(hwnd, &windowedRect);
+                HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+                MONITORINFO mi = { sizeof(mi) };
+                GetMonitorInfo(hMonitor, &mi);
+                SetWindowLongPtr(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+                SetWindowPos(hwnd, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                    mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED);
+            }
+            else {
+                SetWindowLongPtr(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+                SetWindowPos(hwnd, HWND_TOP, windowedRect.left, windowedRect.top,
+                    windowedRect.right - windowedRect.left, windowedRect.bottom - windowedRect.top, SWP_FRAMECHANGED);
+            }
+            return 0;
+        }
+        break;
+    case WM_NCHITTEST: {
+        LRESULT hit = DefWindowProc(hwnd, msg, wParam, lParam);
+        if (hit == HTCLIENT) hit = HTCAPTION;
+        return hit;
+    }
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
 bool WorldToScreen(Vec3 pos, Vec2& screen, float matrix[16], int width, int height) {
     float clipX = pos.x * matrix[0] + pos.y * matrix[4] + pos.z * matrix[8] + matrix[12];
     float clipY = pos.x * matrix[1] + pos.y * matrix[5] + pos.z * matrix[9] + matrix[13];
@@ -16,30 +58,46 @@ bool WorldToScreen(Vec3 pos, Vec2& screen, float matrix[16], int width, int heig
 }
 
 void DrawESP(DMAHandler* dma, HWND gameWindow, DWORD baseAddress, DWORD entityList) {
-    static HWND overlay = nullptr;
-    if (!overlay) {
-        WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, DefWindowProc, 0, 0, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"Overlay", nullptr };
-        RegisterClassEx(&wc);
+    static HWND espWindow = nullptr;
+    if (!espWindow) {
+        // Register window class
+        WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, WndProc, 0, 0, GetModuleHandle(nullptr), nullptr, nullptr, (HBRUSH)(COLOR_WINDOW + 1), nullptr, L"ESPWindow", nullptr };
+        if (!RegisterClassEx(&wc)) {
+            std::cerr << "Failed to register window class. Error: " << GetLastError() << std::endl;
+            return;
+        }
 
-        // Create a 1920x1080 overlay at (0, 0) on PC2
+        // Make a window
         int width = 1920;
         int height = 1080;
-        overlay = CreateWindowEx(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST, L"Overlay", L"ESP",
-            WS_POPUP, 0, 0, width, height, nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
-        SetLayeredWindowAttributes(overlay, RGB(0, 0, 0), 0, LWA_COLORKEY);
-        ShowWindow(overlay, SW_SHOW);
+        espWindow = CreateWindowEx(0, L"ESPWindow", L"AssaultCube ESP",
+            WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, width, height,
+            nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
+        if (!espWindow) {
+            std::cerr << "Failed to create window. Error: " << GetLastError() << std::endl;
+            return;
+        }
+
+        // Show and update the window
+        ShowWindow(espWindow, SW_SHOW);
+        UpdateWindow(espWindow);
     }
 
-    HDC hdc = GetDC(overlay);
+    // Get device context and clear the window with a solid background
+    HDC hdc = GetDC(espWindow);
+    if (!hdc) return;
     SetBkMode(hdc, TRANSPARENT);
-    RECT rect = { 0, 0, 1920, 1080 };
-    HBRUSH brush = CreateSolidBrush(RGB(0, 0, 0));
+    RECT rect = { 0, 0, 800, 600 };
+    GetClientRect(espWindow, &rect);
+    HBRUSH brush = CreateSolidBrush(RGB(0, 0, 0)); 
     FillRect(hdc, &rect, brush);
     DeleteObject(brush);
 
+    // Get window dimensions
     int width = rect.right - rect.left;
     int height = rect.bottom - rect.top;
 
+    // Draw FOV circle
     const float fovAngle = 30.0f;
     float fovRadius = tan(fovAngle * 3.14159265f / 360.0f) * width * 0.5f;
     HPEN fovPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
@@ -51,13 +109,16 @@ void DrawESP(DMAHandler* dma, HWND gameWindow, DWORD baseAddress, DWORD entityLi
     DeleteObject(fovPen);
     DeleteObject(nullBrush);
 
+    // Read view matrix
     float viewMatrix[16];
     dma->read(baseAddress + VIEW_MATRIX, (ULONG64)viewMatrix, sizeof(viewMatrix));
 
+    // Aimbot logic
     bool aimbotActive = GetAsyncKeyState(VK_XBUTTON1) & 0x8000;
     Vec2 closestTarget = { -1, -1 };
     float closestDist = fovRadius + 1;
 
+    // Iterate through players
     for (int i = 0; i < 32; i++) {
         DWORD playerAddr = 0;
         dma->read(entityList + i * 4, (ULONG64)&playerAddr, sizeof(DWORD));
@@ -89,6 +150,7 @@ void DrawESP(DMAHandler* dma, HWND gameWindow, DWORD baseAddress, DWORD entityLi
         }
     }
 
+    // Aimbot mouse movement
     if (aimbotActive && closestTarget.x != -1 && closestTarget.y != -1) {
         POINT currentPos;
         GetCursorPos(&currentPos);
@@ -105,5 +167,5 @@ void DrawESP(DMAHandler* dma, HWND gameWindow, DWORD baseAddress, DWORD entityLi
         }
     }
 
-    ReleaseDC(overlay, hdc);
+    ReleaseDC(espWindow, hdc);
 }

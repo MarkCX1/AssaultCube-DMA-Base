@@ -148,14 +148,30 @@ int main() {
     // Run features and refresh player list every 1 second
     ULONGLONG lastRefresh = GetTickCount64();
     const ULONGLONG refreshInterval = 1000;
-    while (true) {
+    bool running = true;
+
+    while (running) {
+        // Process Windows messages
+        MSG msg;
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                running = false;
+                break;
+            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+
+        if (!running) break;
+
         // Run health and ammo mods
         RunHealthMod(d_handler, localPlayer);
         RunAmmoMod(d_handler, localPlayer);
 
-        // Draw ESP (pass NULL for hwnd since it's not needed)
-        DrawESP(d_handler, NULL, baseAddress, entityList);
+        // Draw ESP
+        DrawESP(d_handler, nullptr, baseAddress, entityList);
 
+        // Update console periodically
         ULONGLONG currentTime = GetTickCount64();
         if (currentTime - lastRefresh >= refreshInterval) {
             ClearConsole();
@@ -164,6 +180,7 @@ int main() {
             lastRefresh = currentTime;
         }
 
+        // Small delay to prevent excessive CPU usage
         Sleep(1);
     }
 
